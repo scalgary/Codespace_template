@@ -1,0 +1,489 @@
+---
+title: "Open Data Canada"
+format: html
+---
+
+Document pour travailler sur API Open data
+
+Important de savoir que open API utilise CKAN
+
+
+```{json}
+"responses": {
+  "200": {
+    "description": "Success response",
+    "content": {
+      "application/json": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "help": {"type": "string"},
+            "success": {"type": "boolean"},
+            "result": {"type": "object"}
+          }
+        },
+        "examples": {
+          "success": {
+            "value": {
+              "help": "https://...",
+              "success": true,
+              "result": {...}
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+
+```{python}
+#!/usr/bin/env python3
+"""
+Test très simple pour vérifier si l'API fonctionne
+"""
+
+import requests
+
+# URL de l'endpoint status
+url = "https://open.canada.ca/data/api/action/status_show"
+
+try:
+    # Faire la requête
+    response = requests.get(url)
+    
+    # Vérifier si ça marche
+    if response.status_code == 200:
+        data = response.json()
+        
+        if data.get("success"):
+            print("✅ API fonctionne!")
+            print(f"Version CKAN: {data['result'].get('ckan_version', 'Unknown')}")
+        else:
+            print("❌ API répond mais avec erreur")
+            print(f"Erreur: {data.get('error', 'Unknown')}")
+    else:
+        print(f"❌ Erreur HTTP: {response.status_code}")
+
+except Exception as e:
+    print(f"❌ Erreur de connexion: {e}")
+```
+
+https://open.canada.ca/data/api/action/status_show
+
+Règles générales identifiées
+✅ TOUJOURS PUBLICS :
+
+Tous les endpoints GET (lecture seule)
+Recherche et consultation de données
+Pas de modification possible
+
+🔒 TOUJOURS SÉCURISÉS :
+
+Tous les endpoints POST (modification)
+Création, mise à jour, suppression
+Upload de fichiers
+
+
+```{python}
+#!/usr/bin/env python3
+"""
+Test et exploration de l'endpoint organization_list
+"""
+
+import requests
+import json
+
+
+"""Teste l'endpoint organization_list"""
+url = "https://open.canada.ca/data/api/action/organization_list"
+    
+try:
+    print("Test de l'endpoint organization_list...")
+    response = requests.get(url, timeout=10)
+        
+    if response.status_code == 200:
+        data = response.json()
+            
+        if data.get("success"):
+            organizations = data["result"]
+                
+            print(f"Statut: SUCCESS")
+            print(f"Nombre d'organisations: {len(organizations)}")
+            print(f"Type de données: {type(organizations)}")
+                
+            # Afficher les premières organisations
+            print(f"\nPremières 10 organisations:")
+            for i, org in enumerate(organizations[:10]):
+                print(f"  {i+1:2d}. {org}")
+                
+            # Afficher les dernières pour voir le format
+            print(f"\nDernières 5 organisations:")
+            for org in organizations[-5:]:
+                print(f"  - {org}")
+                
+        else:
+                print(f"Erreur API: {data.get('error')}")
+                
+    else:
+        print(f"Erreur HTTP: {response.status_code}")
+        
+            
+except Exception as e:
+    print(f"Erreur: {e}")
+   
+
+
+def get_organization_details(org_name):
+    """Récupère les détails d'une organisation spécifique"""
+    url = f"https://open.canada.ca/data/api/action/organization_show"
+    params = {"id": org_name}
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("success"):
+                org_details = data["result"]
+                return {
+                    "name": org_details.get("name"),
+                    "title": org_details.get("title", "N/A"),
+                    "description": org_details.get("description", "N/A")[:100] + "..." if org_details.get("description") else "N/A",
+                    "package_count": org_details.get("package_count", 0),
+                    "created": org_details.get("created", "N/A"),
+                }
+        return None
+    except:
+        return None
+
+def explore_top_organizations(organizations):
+    """Explore les détails de quelques organisations"""
+    print(f"\nExploration des détails d'organisations:")
+    
+    # Organisations à explorer (supposées importantes)
+    orgs_to_check = ["ec", "tbs-sct", "statcan", "nrcan"]
+    
+    # Ajouter quelques organisations de la liste si elles existent
+    available_orgs = [org for org in orgs_to_check if org in organizations]
+    
+    if not available_orgs:
+        # Prendre les premières de la liste
+        available_orgs = organizations[:5]
+    
+    for org_name in available_orgs[:5]:  # Limiter à 5 pour ne pas surcharger
+        print(f"\n--- {org_name} ---")
+        details = get_organization_details(org_name)
+        
+        if details:
+            print(f"  Nom complet: {details['title']}")
+            print(f"  Datasets: {details['package_count']}")
+            print(f"  Créé: {details['created']}")
+            print(f"  Description: {details['description']}")
+        else:
+            print(f"  Impossible de récupérer les détails")
+
+
+```
+
+
+```{python}
+url = "https://open.canada.ca/data/api/action/organization_show"
+params = {"id": "2canl"}
+
+try:
+    response = requests.get(url, params=params, timeout=10)
+    if response.status_code == 200:
+        data = response.json()
+        if data.get("success"):
+            org_info = data["result"]
+            retour= {
+                "short_name": org_info.get("name"),
+                "full_name": org_info.get("title", "N/A"),
+                "package_count": org_info.get("package_count", 0)
+            }
+except:
+    pass
+retour
+```
+
+
+```{python}
+import requests
+import json
+from concurrent.futures import ThreadPoolExecutor
+
+def get_org_details_batch(org_names, max_workers=5):
+    """Récupère les détails de plusieurs organisations en parallèle"""
+    
+    def fetch_single_org(org_name):
+        url = "https://open.canada.ca/data/api/action/organization_show"
+        try:
+            response = requests.get(url, params={"id": org_name}, timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("success"):
+                    org_info = data["result"]
+                    return {
+                        "short_name": org_name,
+                        "full_name": org_info.get("title", "N/A"),
+                        "package_count": org_info.get("package_count", 0)
+                    }
+        except:
+            pass
+        return {"short_name": org_name, "full_name": "Erreur", "package_count": 0}
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(fetch_single_org, org_names))
+    
+    return results
+
+# Votre code principal
+url = "https://open.canada.ca/data/api/action/organization_list"
+
+try:
+    response = requests.get(url, timeout=10)
+    
+    if response.status_code == 200:
+        data = response.json()
+        
+        if data.get("success"):
+            organizations = data["result"]
+            print(f"Nombre d'organisations: {len(organizations)}")
+            
+            # Récupérer les détails des 20 premières (plus rapide)
+            org_details = get_org_details_batch(organizations)
+            
+            print(f"\nOrganisations avec noms complets:")
+            for i, org in enumerate(org_details):
+                print(f"  {i+1:2d}. {org['short_name']:<25} -> {org['full_name']} ({org['package_count']} datasets)")
+                
+except Exception as e:
+    print(f"Erreur: {e}")
+```
+
+
+```{python}
+#!/usr/bin/env python3
+"""
+Récupère toutes les organisations et crée une table triée par nombre de datasets
+"""
+
+import requests
+import time
+import json
+from datetime import datetime
+
+def get_all_organizations():
+    """Récupère la liste complète des organisations"""
+    url = "https://open.canada.ca/data/api/action/organization_list"
+    
+    try:
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("success"):
+                return data["result"]
+    except Exception as e:
+        print(f"Erreur lors de la récupération des organisations: {e}")
+    
+    return []
+
+def get_organization_details(org_name, retry_count=3):
+    """Récupère les détails d'une organisation avec retry"""
+    url = "https://open.canada.ca/data/api/action/organization_show"
+    
+    for attempt in range(retry_count):
+        try:
+            response = requests.get(url, params={"id": org_name}, timeout=25)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("success"):
+                    org_info = data["result"]
+                    return {
+                        "short_name": org_name,
+                        "full_name": org_info.get("title", "N/A"),
+                        "package_count": org_info.get("package_count", 0),
+                        "created": org_info.get("created", "N/A")
+                    }
+            elif response.status_code == 404:
+                # Organisation n'existe pas
+                return None
+                
+        except requests.exceptions.Timeout:
+            print(f"Timeout pour {org_name}, tentative {attempt + 1}/{retry_count}")
+            if attempt < retry_count - 1:
+                time.sleep(2)
+        except Exception as e:
+            print(f"Erreur pour {org_name}: {e}")
+            break
+    
+    # Si toutes les tentatives échouent
+    return {
+        "short_name": org_name,
+        "full_name": "ERREUR - Timeout",
+        "package_count": -1,
+        "created": "N/A"
+    }
+
+def create_organizations_table():
+    """Crée la table complète des organisations"""
+    print("Récupération de la liste des organisations...")
+    
+    # Étape 1: Récupérer la liste
+    organizations = get_all_organizations()
+    if not organizations:
+        print("Impossible de récupérer la liste des organisations")
+        return
+    
+    print(f"Trouvé {len(organizations)} organisations")
+    print("Récupération des détails (cela peut prendre plusieurs minutes)...")
+    
+    # Étape 2: Récupérer les détails de chaque organisation
+    org_details = []
+    total = len(organizations)
+    
+    for i, org_name in enumerate(organizations):
+        # Afficher le progrès
+        if i % 10 == 0 or i == total - 1:
+            print(f"Progrès: {i+1}/{total} ({((i+1)/total)*100:.1f}%)")
+        
+        details = get_organization_details(org_name)
+        if details:
+            org_details.append(details)
+        
+        # Pause pour éviter de surcharger le serveur
+        time.sleep(0.5)
+    
+    # Étape 3: Trier par nombre de datasets (décroissant)
+    org_details.sort(key=lambda x: x["package_count"], reverse=True)
+    
+    # Étape 4: Afficher la table
+    print_organizations_table(org_details)
+    
+    # Étape 5: Sauvegarder
+    save_organizations_table(org_details)
+    
+    return org_details
+
+def print_organizations_table(org_details):
+    """Affiche la table formatée"""
+    print("\n" + "="*90)
+    print("TABLE DES ORGANISATIONS - TRIÉE PAR NOMBRE DE DATASETS")
+    print("="*90)
+    
+    # En-tête
+    print(f"{'Rang':<4} {'Short Name':<25} {'Datasets':<10} {'Full Name'}")
+    print("-" * 90)
+    
+    # Données
+    for i, org in enumerate(org_details, 1):
+        short_name = org["short_name"][:24]  # Limiter la longueur
+        full_name = org["full_name"][:50] if org["full_name"] != "N/A" else "N/A"
+        dataset_count = org["package_count"]
+        
+        # Gérer les erreurs
+        if dataset_count == -1:
+            dataset_count = "ERROR"
+        
+        print(f"{i:<4} {short_name:<25} {str(dataset_count):<10} {full_name}")
+    
+    print("-" * 90)
+    print(f"Total: {len(org_details)} organisations")
+
+def print_top_organizations(org_details, top_n=20):
+    """Affiche seulement le top N"""
+    print(f"\n TOP {top_n} ORGANISATIONS PAR NOMBRE DE DATASETS")
+    print("="*70)
+    
+    print(f"{'Rang':<4} {'Short Name':<20} {'Datasets':<10} {'Full Name'}")
+    print("-" * 70)
+    
+    for i, org in enumerate(org_details[:top_n], 1):
+        short_name = org["short_name"][:19]
+        full_name = org["full_name"][:35] if org["full_name"] != "N/A" else "N/A"
+        dataset_count = org["package_count"]
+        
+        if dataset_count == -1:
+            dataset_count = "ERROR"
+        
+        print(f"{i:<4} {short_name:<20} {str(dataset_count):<10} {full_name}")
+
+def save_organizations_table(org_details):
+    """Sauvegarde la table en JSON et CSV"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Sauvegarder en JSON
+    json_filename = f"organizations_table_{timestamp}.json"
+    json_data = {
+        "timestamp": datetime.now().isoformat(),
+        "total_organizations": len(org_details),
+        "organizations": org_details
+    }
+    
+    with open(json_filename, 'w', encoding='utf-8') as f:
+        json.dump(json_data, f, indent=2, ensure_ascii=False)
+    
+    # Sauvegarder en CSV
+    csv_filename = f"organizations_table_{timestamp}.csv"
+    with open(csv_filename, 'w', encoding='utf-8') as f:
+        f.write("Rang,Short Name,Full Name,Datasets,Created\n")
+        for i, org in enumerate(org_details, 1):
+            short_name = org["short_name"].replace(',', ';')
+            full_name = org["full_name"].replace(',', ';')
+            dataset_count = org["package_count"]
+            created = org["created"]
+            
+            f.write(f"{i},{short_name},{full_name},{dataset_count},{created}\n")
+    
+    print(f"\nDonnées sauvegardées:")
+    print(f"  JSON: {json_filename}")
+    print(f"  CSV:  {csv_filename}")
+
+def quick_test_top_orgs():
+    """Test rapide avec seulement quelques organisations importantes"""
+    print("Test rapide avec organisations principales...")
+    
+    # Organisations importantes connues
+    important_orgs = [
+        "statcan", "ec", "tbs-sct", "nrcan", "dfo-mpo", 
+        "hc-sc", "pspc-spac", "tc", "dnd-mdn", "ircc"
+    ]
+    
+    org_details = []
+    
+    for org_name in important_orgs:
+        print(f"Récupération de {org_name}...")
+        details = get_organization_details(org_name)
+        if details and details["package_count"] != -1:
+            org_details.append(details)
+        time.sleep(1)
+    
+    # Trier et afficher
+    org_details.sort(key=lambda x: x["package_count"], reverse=True)
+    print_top_organizations(org_details, len(org_details))
+    
+    return org_details
+
+def main():
+    """Fonction principale"""
+    print("GÉNÉRATEUR DE TABLE DES ORGANISATIONS")
+    print("="*50)
+    
+    choice = input("Voulez-vous faire:\n1. Test rapide (top organisations)\n2. Table complète (long)\nChoix (1/2): ")
+    
+    if choice == "1":
+        org_details = quick_test_top_orgs()
+    else:
+        org_details = create_organizations_table()
+    
+    if org_details:
+        # Statistiques
+        total_datasets = sum(org["package_count"] for org in org_details if org["package_count"] > 0)
+        print(f"\nSTATISTIQUES:")
+        print(f"  Organisations actives: {len([o for o in org_details if o['package_count'] > 0])}")
+        print(f"  Total datasets: {total_datasets}")
+        print(f"  Moyenne par organisation: {total_datasets/len(org_details):.1f}")
+
+```
